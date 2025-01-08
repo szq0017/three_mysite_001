@@ -153,13 +153,20 @@ export default function Component() {
         })
         const contentPanels: THREE.Mesh[] = []
 
-        for (let i = 0; i < 5; i++) {
+        // パネルを円形に配置
+        const numPanels = 5
+        const radius = 8 // カメラからの距離
+        const fixedHeight = 5 // 固定のY座標
+
+        for (let i = 0; i < numPanels; i++) {
+            const angle = (i / numPanels) * Math.PI * 2
             const panel = new THREE.Mesh(contentGeometry, contentMaterial)
-            panel.position.set(
-                Math.random() * 10 - 5,
-                Math.random() * 5,
-                Math.random() * 10 - 5,
-            )
+
+            // 円形に配置する座標を計算
+            const x = Math.cos(angle) * radius
+            const z = Math.sin(angle) * radius
+
+            panel.position.set(x, fixedHeight, z)
             panel.lookAt(newCamera.position)
             scene.add(panel)
             contentPanels.push(panel)
