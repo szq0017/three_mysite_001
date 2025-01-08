@@ -15,6 +15,7 @@ import { Menu } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import * as TWEEN from '@tweenjs/tween.js'
 import { FPSCamera } from '@/components/FPSCamera'
+import Stats from 'three/examples/jsm/libs/stats.module.js'
 
 export default function Component() {
     const containerRef = useRef<HTMLDivElement>(null)
@@ -23,13 +24,26 @@ export default function Component() {
         null,
     )
     const [isContentMode, setIsContentMode] = useState(false)
+    const [isLowPerformance, setIsLowPerformance] = useState(false)
 
-    // カメラとコントロールの状態を���
+    // カメラとコントロールの状態
     const [camera, setCamera] = useState<THREE.PerspectiveCamera | null>(null)
     const [controls, setControls] = useState<OrbitControls | null>(null)
 
     useEffect(() => {
         if (!containerRef.current) return
+
+        // パフォーマンスモニタリング
+        const stats = new Stats()
+        stats.dom.style.position = 'absolute'
+        stats.dom.style.top = '0px'
+        stats.dom.style.left = '0px'
+        containerRef.current.appendChild(stats.dom)
+
+        // デバイス性能の検出
+        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+        const isLowPerfDevice = isMobile || !('gpu' in navigator)
+        setIsLowPerformance(isLowPerfDevice)
 
         // Scene setup
         const scene = new THREE.Scene()
@@ -39,16 +53,22 @@ export default function Component() {
             0.1,
             1000,
         )
+
+        // レンダラーの最適化設定
         const renderer = new THREE.WebGLRenderer({
-            antialias: true,
+            antialias: !isLowPerfDevice, // 低スペックデバイスではアンチエイリアスを無効化
             alpha: true,
+            powerPreference: 'low-power', // 省電力モードを優先
+            precision: isLowPerfDevice ? 'lowp' : 'mediump', // 低スペックデバイスでは精度を下げる
         })
 
+        // レンダラーの解像度設定
+        const pixelRatio = isLowPerfDevice ? 1 : window.devicePixelRatio
+        renderer.setPixelRatio(pixelRatio)
         renderer.setSize(window.innerWidth, window.innerHeight)
-        renderer.setPixelRatio(window.devicePixelRatio)
         containerRef.current.appendChild(renderer.domElement)
 
-        // CSS3D Renderer setup
+        // CSS3D Renderer setup with optimized settings
         const css3DRenderer = new CSS3DRenderer()
         css3DRenderer.setSize(window.innerWidth, window.innerHeight)
         css3DRenderer.domElement.style.position = 'absolute'
@@ -78,7 +98,7 @@ export default function Component() {
         scene.add(pointLight)
 
         // カメラの初期設定
-        newCamera.position.set(0, 15, 30)
+        newCamera.position.set(0, 5, 10)
         setCamera(newCamera)
 
         // コントロールの初期設定
@@ -94,26 +114,30 @@ export default function Component() {
         newControls.enablePan = false
         setControls(newControls)
 
-        // Post-processing
+        // Post-processing の最適化
         const composer = new EffectComposer(renderer)
         const renderPass = new RenderPass(scene, newCamera)
         composer.addPass(renderPass)
 
-        const bloomPass = new UnrealBloomPass(
-            new THREE.Vector2(window.innerWidth, window.innerHeight),
-            1.5,
-            0.4,
-            0.85,
-        )
-        composer.addPass(bloomPass)
+        // 低スペックデバイスではブルームエフェクトを軽量化
+        if (!isLowPerfDevice) {
+            const bloomPass = new UnrealBloomPass(
+                new THREE.Vector2(window.innerWidth, window.innerHeight),
+                1.5,
+                0.4,
+                0.85,
+            )
+            composer.addPass(bloomPass)
+        }
 
+        // アウトラインパスの最適化
         const outlinePass = new OutlinePass(
             new THREE.Vector2(window.innerWidth, window.innerHeight),
             scene,
             newCamera,
         )
-        outlinePass.edgeStrength = 3
-        outlinePass.edgeGlow = 0.7
+        outlinePass.edgeStrength = isLowPerfDevice ? 2 : 3
+        outlinePass.edgeGlow = isLowPerfDevice ? 0.5 : 0.7
         outlinePass.edgeThickness = 1
         outlinePass.visibleEdgeColor.set('#ffffff')
         outlinePass.hiddenEdgeColor.set('#190a05')
@@ -221,15 +245,32 @@ export default function Component() {
             }
         }
 
-        // Animation
-        const animate = () => {
+        // 30FPS制限付きアニメーション
+        const frameInterval = 1000 / 30 // 30FPS
+        let lastTime = 0
+
+        const animate = (currentTime: number) => {
             requestAnimationFrame(animate)
 
-            // Animate content panels
-            contentPanels.forEach((panel, index) => {
-                panel.position.y += Math.sin(Date.now() * 0.001 + index) * 0.001
-                panel.lookAt(newCamera.position)
-            })
+            // 30FPSの制限
+            if (currentTime - lastTime < frameInterval) {
+                return
+            }
+            lastTime = currentTime
+
+            // パフォーマンスモニタリング更新
+            stats.begin()
+
+            // パネルのアニメーションを最適化
+            if (!isContentMode) {
+                contentPanels.forEach((panel, index) => {
+                    // 低スペックデバイスではアニメーションを簡素化
+                    const animationSpeed = isLowPerfDevice ? 0.0005 : 0.001
+                    panel.position.y +=
+                        Math.sin(Date.now() * animationSpeed + index) * 0.001
+                    panel.lookAt(newCamera.position)
+                })
+            }
 
             // Make newsObject face the camera
             newsObject.lookAt(newCamera.position)
@@ -237,32 +278,34 @@ export default function Component() {
             TWEEN.update()
             composer.render()
             css3DRenderer.render(scene, newCamera)
+
+            stats.end()
         }
 
-        animate()
+        animate(0)
 
-        // Responsive design
+        // レスポンシブ設定の最適化
         const onWindowResize = () => {
             newCamera.aspect = window.innerWidth / window.innerHeight
             newCamera.updateProjectionMatrix()
-            renderer.setSize(window.innerWidth, window.innerHeight)
-            css3DRenderer.setSize(window.innerWidth, window.innerHeight)
-            composer.setSize(window.innerWidth, window.innerHeight)
+
+            const newWidth = window.innerWidth
+            const newHeight = window.innerHeight
+
+            // 低スペックデバイスでは解像度を下げる
+            const scale = isLowPerfDevice ? 0.75 : 1
+            renderer.setSize(newWidth * scale, newHeight * scale, false)
+            css3DRenderer.setSize(newWidth, newHeight)
+            composer.setSize(newWidth * scale, newHeight * scale)
         }
 
         window.addEventListener('resize', onWindowResize)
         window.addEventListener('mousemove', onMouseMoveInteraction)
         window.addEventListener('click', onMouseClick)
 
-        // Cleanup
+        // Enhanced cleanup
         return () => {
-            // window.removeEventListener('wheel', onwheel)
-            // window.removeEventListener('mousedown', onmousedown)
-            // window.removeEventListener('mousemove', onmousemove)
-            // window.removeEventListener('mouseup', onmouseup)
-            // window.removeEventListener('touchstart', ontouchstart)
-            // window.removeEventListener('touchmove', ontouchmove)
-            // window.removeEventListener('touchend', ontouchend)
+            stats.dom.remove()
             window.removeEventListener('mousemove', onMouseMoveInteraction)
             window.removeEventListener('click', onMouseClick)
             window.removeEventListener('resize', onWindowResize)
@@ -274,6 +317,12 @@ export default function Component() {
 
     return (
         <div className="relative h-screen w-full overflow-hidden bg-black">
+            {/* パフォーマンスモード表示 */}
+            {isLowPerformance && (
+                <div className="absolute top-16 right-6 z-10 bg-black/50 text-white px-3 py-1 rounded-full text-sm">
+                    低パフォーマンスモード
+                </div>
+            )}
             {/* THREE.js container */}
             <div ref={containerRef} className="absolute inset-0 touch-none" />
 
